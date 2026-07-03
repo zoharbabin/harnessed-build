@@ -11,8 +11,11 @@ Execute the above target in 4 phases. Each phase has hard requirements, not sugg
 PHASE 0 — TRACKER DISCOVERY
 Check whether this repo has a usable issue tracker: `gh repo view` (GitHub) or an equivalent already configured (Jira/Linear MCP, etc.). If one exists, it's the Phase 1 spec's home. If none exists, ask the user where the spec should live before proceeding — do not default to writing a spec file into the repo.
 
+MODEL & EFFORT DISCIPLINE (applies to every subagent you spawn in Phases 1-3)
+Default subagents to `sonnet` at `high` effort. Drop mechanical work (grep, file reads, lint-output parsing) to `haiku`/`low`. Never let a subagent inherit `opus`/`max` by omission — an unset model silently inherits the parent's, which is expensive on work that doesn't need it. Escalate a single stuck unit (one harness gate, one module) to `opus`, never the whole phase, and only after: (a) you've ruled out a structure problem — right decomposition, right context, the check itself is correct; (b) you've already retried at `high`/`xhigh` effort on the same model; and (c) one of these applies — retries fail the same way twice, the failure only appears when parts combine, an unchecked mistake here is costly and needs current best-practice research, or it's a long chain where one bad step breaks the whole run. Why: model tier is the most expensive lever — spend it on units that actually need more reasoning depth, not on ones that need a better prompt.
+
 PHASE 1 — SPEC (write before any code change)
-Create or update an issue in the tracker found in Phase 0, containing numbered, testable rules covering:
+On an unfamiliar codebase, fan out one `sonnet` subagent per rule category below to survey current state before you write the issue; skip this on a codebase you already know. Create or update an issue in the tracker found in Phase 0, containing numbered, testable rules covering:
 1. Isolation — per-instance state only, no module-level mutable state. Why: shared state across instances causes cross-request data leaks and hard-to-reproduce bugs.
 2. Security — no dynamic code execution (`eval`/`exec`/`pickle`/`shell=True`); no untrusted input reaches a path, command, or query unsanitized; secrets read from env only, never logged. Why: these are the actual injection/exfiltration vectors attackers exploit, not hypothetical ones.
 3. Resiliency — network I/O wrapped in retry with exponential backoff and a bounded attempt count; failures degrade gracefully. Why: transient network failures are the norm, not the exception, in production.
@@ -23,7 +26,7 @@ Each rule ends with a `Proof:` line naming the exact test/harness gate that chec
 Never write a spec file into the repo (no `CONSTITUTION_*.md` or similar) — the tracker issue is the durable record; a repo file just becomes clutter to clean up after merge. Code comments cite the issue ID (`see issue #NN`), never a file path — file paths get deleted, issue IDs don't.
 
 PHASE 2 — HARNESS (build before any implementation)
-Write one script that runs, in order, and fails loud on any non-zero exit:
+Write one script that runs, in order, and fails loud on any non-zero exit. These 6 gates are independent — build them as parallel `sonnet` subagents, then assemble one script from the results:
 1. Lint (project's existing linter/config).
 2. SAST scan.
 3. Multi-instance isolation test — construct 2+ instances in one process, assert no shared state. This is the only way to actually prove rule 1, not just assert it.
@@ -34,7 +37,8 @@ Commit the script as permanent infra — it's the regression gate for every futu
 Run it now. It must fail — no implementation exists yet, and a harness that passes before you've built anything is testing nothing. Do not proceed to Phase 3 until you've confirmed this failing baseline.
 
 PHASE 3 — IMPLEMENTATION
-One module at a time — a monolithic rewrite hides which change broke what. Re-run the harness after each module. Before deleting a file/function you believe is unused, prove it via the harness (dead-code gate + full suite green), or ask the user — "looks unused" and "is unused" differ often enough to matter. Every line you write must be complete and tested on the spot; a stub or TODO left behind is a promise the next person has to keep, and they won't know it's there.
+One module at a time — a monolithic rewrite hides which change broke what. Modules with no shared state (per rule 1) may run as parallel subagents instead; default to sequential, since catching cross-module breakage early is usually worth more than the time saved. Re-run the harness after each module. Before deleting a file/function you believe is unused, prove it via the harness (dead-code gate + full suite green), or ask the user — "looks unused" and "is unused" differ often enough to matter. Every line you write must be complete and tested on the spot; a stub or TODO left behind is a promise the next person has to keep, and they won't know it's there.
+If a module's harness run fails the same way twice, don't reach for `opus` yet — re-check decomposition, context, and effort level per the Model & Effort Discipline block first. Only escalate that module's subagent to `opus` once you've done that and one of its four conditions applies.
 
 PHASE 4 — TERMINATION
 Do not declare completion in prose — a claim isn't a proof, and this is the whole point of the harness. The only valid termination is: harness exits 0, AND you've closed the Phase-1 issue with a comment containing the full gate-by-gate result, so the proof outlives this session. Print that same closing comment as your last output.
